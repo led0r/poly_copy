@@ -35,7 +35,7 @@ if config_env() == :prod do
     System.get_env("SECRET_KEY_BASE") ||
       "AaR7ZRXC3NM3XykTdW8CgqIK8sLqr7Y9Boz6OS+JKfcCfh0yd3w2JR5vgMLZGHYE"
 
-  host = System.get_env("PHX_HOST") || "localhost"
+  # host = System.get_env("PHX_HOST") || "localhost"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
   config :polyx, PolyxWeb.Endpoint,

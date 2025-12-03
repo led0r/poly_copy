@@ -19,7 +19,8 @@ https://github.com/user-attachments/assets/e8bb17bd-4f6a-44b4-a6d2-86de6401e74f
 <details>
   <summary>2. How to start? </summary>
   
-  Get binary from [releases](https://github.com/lalabuy948/poly_copy/releases) for your OS or run in dev mode via elixir. 
+  Get binary from [releases](https://github.com/lalabuy948/poly_copy/releases) for your OS or run in dev mode via elixir.
+  Once binary started visit [http://localhost:4000/](http://localhost:4000/).
 </details>
 
 <details>
