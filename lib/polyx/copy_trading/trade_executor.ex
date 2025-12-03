@@ -10,7 +10,7 @@ defmodule Polyx.CopyTrading.TradeExecutor do
 
   alias Polyx.Polymarket.Client
   alias Polyx.CopyTrading
-  alias Polyx.CopyTrading.CopyTrade
+  alias Polyx.CopyTrading.{CopyTrade, Settings}
   alias Polyx.Repo
 
   defstruct settings: %{
@@ -56,13 +56,21 @@ defmodule Polyx.CopyTrading.TradeExecutor do
     GenServer.call(__MODULE__, {:delete_copy_trade, trade_id})
   end
 
+  def delete_all_failed_copy_trades do
+    GenServer.call(__MODULE__, :delete_all_failed_copy_trades)
+  end
+
   # Server callbacks
 
   @impl true
   def init(_opts) do
     # Subscribe to trade events
     CopyTrading.subscribe()
-    {:ok, %__MODULE__{}}
+
+    # Load settings from database
+    settings = Settings.get_or_create() |> Settings.to_map()
+
+    {:ok, %__MODULE__{settings: settings}}
   end
 
   @impl true
@@ -72,31 +80,15 @@ defmodule Polyx.CopyTrading.TradeExecutor do
 
   @impl true
   def handle_call({:update_settings, opts}, _from, state) do
-    new_settings =
-      Enum.reduce(opts, state.settings, fn
-        {:sizing_mode, mode}, settings when mode in [:fixed, :proportional, :percentage] ->
-          Map.put(settings, :sizing_mode, mode)
+    case Settings.update(opts) do
+      {:ok, new_settings} ->
+        Logger.info("Updated copy trading settings: #{inspect(new_settings)}")
+        CopyTrading.broadcast(:settings_updated, new_settings)
+        {:reply, {:ok, new_settings}, %{state | settings: new_settings}}
 
-        {:fixed_amount, amount}, settings when is_number(amount) and amount > 0 ->
-          Map.put(settings, :fixed_amount, amount)
-
-        {:proportional_factor, factor}, settings when is_number(factor) and factor > 0 ->
-          Map.put(settings, :proportional_factor, factor)
-
-        {:percentage, pct}, settings when is_number(pct) and pct > 0 and pct <= 100 ->
-          Map.put(settings, :percentage, pct)
-
-        {:enabled, enabled}, settings when is_boolean(enabled) ->
-          Map.put(settings, :enabled, enabled)
-
-        _, settings ->
-          settings
-      end)
-
-    Logger.info("Updated copy trading settings: #{inspect(new_settings)}")
-    CopyTrading.broadcast(:settings_updated, new_settings)
-
-    {:reply, {:ok, new_settings}, %{state | settings: new_settings}}
+      {:error, _changeset} = error ->
+        {:reply, error, state}
+    end
   end
 
   @impl true
@@ -166,6 +158,34 @@ defmodule Polyx.CopyTrading.TradeExecutor do
   end
 
   @impl true
+  def handle_call(:delete_all_failed_copy_trades, _from, state) do
+    import Ecto.Query
+
+    failed_trades =
+      CopyTrade
+      |> where([t], t.status == "failed")
+      |> Repo.all()
+
+    if failed_trades == [] do
+      {:reply, {:ok, 0}, state}
+    else
+      # Delete all failed trades and broadcast deletions
+      Enum.each(failed_trades, fn db_trade ->
+        case Repo.delete(db_trade) do
+          {:ok, deleted_trade} ->
+            stream_trade = CopyTrade.to_stream_format(deleted_trade)
+            CopyTrading.broadcast(:copy_trade_deleted, stream_trade)
+
+          {:error, _reason} ->
+            :ok
+        end
+      end)
+
+      {:reply, {:ok, length(failed_trades)}, state}
+    end
+  end
+
+  @impl true
   def handle_cast({:execute_copy_trade, %{address: source_address, trade: trade}, force}, state) do
     if force or state.settings.enabled do
       {:noreply, do_execute_copy_trade(state, source_address, trade)}
@@ -191,6 +211,11 @@ defmodule Polyx.CopyTrading.TradeExecutor do
 
   @impl true
   def handle_info({:user_untracked, _user_info}, state) do
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:user_deleted, _user_info}, state) do
     {:noreply, state}
   end
 
